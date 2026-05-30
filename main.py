@@ -365,10 +365,13 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
 
 
     def send_json(self, data: dict, status: int = 200) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            pass
 
     def log_message(self, fmt: str, *args: Any) -> None:
         pass
@@ -448,8 +451,13 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(data)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            logger.warning("二维码请求被客户端中断")
         except Exception as e:
-            self.send_json({"error": str(e)}, 500)
+            try:
+                self.send_json({"error": str(e)}, 500)
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                pass
 
     # ----- Avatar proxy (bypass B站 CDN referrer check) -----
 
@@ -469,8 +477,13 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "public, max-age=86400")
             self.end_headers()
             self.wfile.write(data)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            pass
         except Exception as e:
-            self.send_json({"error": str(e)}, 502)
+            try:
+                self.send_json({"error": str(e)}, 502)
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                pass
 
     # ----- HTML page -----
 
