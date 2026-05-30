@@ -1,0 +1,20 @@
+# 敏感信息
+cookie.json
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 构建产物
+build/
+dist/
+*.spec
+
+# 编译好的 exe 太大，不上传（用户自行编译）
+*.exe
+
+# 系统文件
+Thumbs.db
+.DS_Store

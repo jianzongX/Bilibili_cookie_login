@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>B站扫码登录 · Cookie 工具</title>
+<style>
+:root{--bg:#f0f2f6;--panel:#fff;--text:#222;--text2:#666;--border:#e2e6ee;--accent:#fb7299;--accent-hover:#e65e86;--accent-light:#fff0f5;--input-bg:#f7f9fc;--shadow:0 8px 30px rgba(0,0,0,.07);--radius:14px;--success:#22c55e;--warn:#f59e0b;--error:#ef4444;--info:#3b82f6;--toast-bg:#333;--toast-text:#fff;--code-bg:#f1f4f9;--placeholder-bg:#fafbff;--placeholder-border:#e3e6ef}
+[data-theme=dark]{--bg:#0f111a;--panel:#1a1d2e;--text:#e4e6f0;--text2:#989bb0;--border:#2a2d40;--accent:#fb7299;--accent-hover:#ff8aaa;--accent-light:#2a1a2e;--input-bg:#22253a;--shadow:0 8px 30px rgba(0,0,0,.3);--success:#4ade80;--warn:#fbbf24;--error:#f87171;--info:#60a5fa;--toast-bg:#e4e6f0;--toast-text:#1a1d2e;--code-bg:#22253a;--placeholder-bg:#1a1d2e;--placeholder-border:#2a2d40}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
+.header{background:var(--panel);box-shadow:var(--shadow);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;z-index:10}
+.header h1{font-size:20px;font-weight:700;color:var(--accent);display:flex;align-items:center;gap:8px}
+.header-actions{display:flex;gap:10px;align-items:center}
+.theme-btn{background:none;border:1px solid var(--border);border-radius:8px;padding:6px 10px;cursor:pointer;color:var(--text2);font-size:16px;transition:.2s}
+.theme-btn:hover{color:var(--accent);border-color:var(--accent)}
+.port-badge{font-size:12px;color:var(--text2);background:var(--code-bg);padding:4px 10px;border-radius:6px}
+.main{flex:1;display:flex;gap:20px;padding:20px 24px;max-width:1200px;margin:0 auto;width:100%;align-items:stretch}
+.panel{background:var(--panel);border-radius:var(--radius);box-shadow:var(--shadow);padding:24px;flex:1;min-width:0}
+.qr-panel{text-align:center}
+.qr-box{margin:16px auto;width:290px;height:290px;border-radius:12px;border:1px dashed var(--placeholder-border);background:var(--placeholder-bg);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.qr-box img{width:270px;height:270px;display:block;border-radius:6px}
+.qr-box .placeholder{font-size:13px;line-height:1.7;color:var(--text2);padding:24px}
+.status-line{font-size:19px;font-weight:700;color:var(--accent);margin:8px 0 4px;min-height:28px}
+.detail-line{font-size:13px;color:var(--text2);line-height:1.6;min-height:22px;margin-bottom:4px}
+.expire-line{font-size:13px;margin:6px 0;min-height:20px}
+.expire-line.valid{color:var(--success)}
+.expire-line.expired{color:var(--error)}
+.actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:14px 0 4px}
+.btn{border:none;border-radius:8px;padding:10px 16px;cursor:pointer;font-size:14px;font-weight:500;transition:all .18s;white-space:nowrap}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-hover)}
+.btn-secondary{background:var(--code-bg);color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{background:var(--border)}
+.btn-success{background:#f0fdf4;color:var(--success);border:1px solid #bbf7d0}
+.btn-success:hover{background:#dcfce7}
+[data-theme=dark] .btn-success{background:#1a3a1a;border-color:#2a5c2a}
+[data-theme=dark] .btn-success:hover{background:#204a20}
+.btn-danger{background:#fef2f2;color:var(--error);border:1px solid #fecaca}
+.btn-danger:hover{background:#fee2e2}
+[data-theme=dark] .btn-danger{background:#3b1a1a;border-color:#5c2a2a}
+[data-theme=dark] .btn-danger:hover{background:#4a2020}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.cookie-panel{flex:1}
+.section-title{font-size:15px;font-weight:600;margin:0 0 4px;color:var(--text)}
+.section-hint{font-size:12px;color:var(--text2);line-height:1.5;margin:0 0 10px}
+.section-hint code{background:var(--code-bg);padding:1px 5px;border-radius:4px;font-size:12px}
+.msg-box{margin:0 0 14px;padding:10px 14px;border-radius:8px;font-size:13px;line-height:1.5;border:1px solid var(--border);background:var(--input-bg);word-break:break-word;min-height:20px}
+.msg-box.success{border-color:#bbf7d0;background:#f0fdf4;color:#166534}
+.msg-box.warn{border-color:#fde68a;background:#fffbeb;color:#92400e}
+.msg-box.error{border-color:#fecaca;background:#fef2f2;color:#991b1b}
+.msg-box.info{border-color:#bfdbfe;background:#eff6ff;color:#1e40af}
+[data-theme=dark] .msg-box.success{border-color:#2a5c2a;background:#1a3a1a;color:#86efac}
+[data-theme=dark] .msg-box.warn{border-color:#5c4a1a;background:#2a2010;color:#fde68a}
+[data-theme=dark] .msg-box.error{border-color:#5c2a2a;background:#2a1010;color:#fca5a5}
+[data-theme=dark] .msg-box.info{border-color:#1e3a5c;background:#0f1a2a;color:#93c5fd}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.bookmark-row{display:flex;align-items:center;gap:16px;padding:20px 24px;border-radius:12px;background:var(--input-bg);border:1px solid var(--border);margin:0 0 14px;min-height:80px}.bookmark-icon-wrap{font-size:40px;line-height:1;flex-shrink:0}.bookmark-info{flex:1;min-width:0}.bookmark-title{font-size:15px;font-weight:600;color:var(--text);margin-bottom:2px}.bookmark-desc{font-size:12px;color:var(--text2)}.bookmark-btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:14px 28px;cursor:grab;font-size:16px;font-weight:600;text-decoration:none;transition:.2s;white-space:nowrap;display:inline-block;flex-shrink:0}.bookmark-btn:hover{background:var(--accent-hover)}.bookmark-btn:active{cursor:grabbing;transform:scale(.97)}
+.label-row{display:flex;justify-content:space-between;align-items:center;margin:14px 0 6px;font-size:13px;color:var(--text2)}
+textarea{width:100%;min-height:80px;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.5;resize:vertical;background:var(--input-bg);color:var(--text);font-family:'Menlo','Consolas','Monaco',monospace}
+textarea:focus{outline:none;border-color:var(--accent)}
+.user-card{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;background:var(--input-bg);border:1px solid var(--border);margin-top:14px}
+.user-card img{width:40px;height:40px;border-radius:50%;flex-shrink:0}
+.user-card .uinfo{flex:1;min-width:0}
+.user-card .uname{font-weight:600;font-size:14px}
+.user-card .udetail{font-size:12px;color:var(--text2)}
+.user-card .ubadge{background:var(--accent-light);color:var(--accent);font-size:11px;padding:2px 8px;border-radius:4px}.ustats{font-size:12px;color:var(--text2);margin-top:2px}.ustats strong{color:var(--text)}.ustats .dot{margin:0 4px}
+.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:380px}
+.toast{pointer-events:auto;padding:12px 16px;border-radius:10px;background:var(--toast-bg);color:var(--toast-text);font-size:13px;line-height:1.4;box-shadow:0 8px 24px rgba(0,0,0,.2);animation:toastIn .25s ease;word-break:break-word}
+.toast.out{animation:toastOut .25s ease forwards}
+.toast.success{background:var(--success);color:#fff}
+.toast.warn{background:var(--warn);color:#fff}
+.toast.error{background:var(--error);color:#fff}
+.toast.info{background:var(--info);color:#fff}
+@keyframes toastIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}
+@keyframes toastOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(40px)}}
+@media(max-width:820px){.main{flex-direction:column;padding:12px}.qr-panel{max-width:100%}.qr-box{margin:14px auto}.header h1{font-size:16px}.header{padding:12px 16px}}
+@media(max-width:480px){.panel{padding:16px}.qr-box{width:240px;height:240px}.qr-box img{width:220px;height:220px}.btn{font-size:13px;padding:8px 12px}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>
+    B站扫码登录
+  </h1>
+  <div class="header-actions">
+    <span class="port-badge">127.0.0.1:8888</span>
+    <button class="theme-btn" id="themeToggle" title="切换深色模式">🌓</button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="panel qr-panel">
+    <div class="status-line" id="statusText">加载中...</div>
+    <div class="detail-line" id="detailText">请稍候</div>
+    <div class="expire-line" id="expireLine">Cookie 有效期：<span id="expireText">--</span></div>
+    <div class="expire-line" id="countdownLine" style="font-size:12px;color:var(--text2);min-height:18px"></div>
+
+    <div class="qr-box">
+      <img id="qrImg" src="" alt="二维码" style="display:none">
+      <div class="placeholder" id="qrPlaceholder">暂无二维码<br>点击下方按钮刷新</div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="refreshBtn">刷新二维码</button>
+      <button class="btn btn-secondary" id="loadBtn">读取本地 Cookie</button>
+    </div>
+    <div class="actions" style="margin-top:4px">
+      <button class="btn btn-success" id="testBtn">检测有效性</button>
+      <button class="btn btn-danger" id="deleteBtn">清除 Cookie</button>
+    </div>
+  </div>
+
+  <div class="panel cookie-panel">
+    <div class="section-title">Cookie 工具</div>
+    <div class="section-hint">
+      打开 <code>bilibili.com</code> → <code>F12</code> → <code>Console</code> → 粘贴代码回车<br>
+      若禁止粘贴，先输入 <code>allow pasting</code> 回车
+    </div>
+
+    <div class="msg-box" id="messageBox">启动完成，点击「读取本地 Cookie」加载已有数据。</div>
+
+    <div class="toolbar">
+      <button class="btn btn-primary" id="copyInjectBtn">复制注入代码</button>
+      <button class="btn btn-secondary" id="copyRawBtn">复制原始 Cookie</button>
+      <button class="btn btn-secondary" id="copyCurlBtn">复制 Curl 格式</button>
+    </div>
+
+    <div class="bookmark-row">
+      <div class="bookmark-icon-wrap">📌</div>
+      <div class="bookmark-info">
+        <div class="bookmark-title">拖到浏览器书签栏</div>
+        <div class="bookmark-desc">在 bilibili.com 页面点击该标签即可自动注入 Cookie</div>
+      </div>
+      <a class="bookmark-btn" id="bookmarkletLink" draggable="true">注入B站Cookie</a>
+    </div>
+
+    <div id="userCard" class="user-card" style="display:none">
+      <img id="userAvatar" src="" alt="avatar">
+      <div class="uinfo">
+        <div class="uname" id="userName">--</div>
+        <div class="udetail">UID: <span id="userUid">--</span> · Lv.<span id="userLevel">--</span></div>
+        <div class="ustats">
+          <span>粉丝 <strong id="userFollower">--</strong></span>
+          <span class="dot">·</span>
+          <span>关注 <strong id="userFollowing">--</strong></span>
+        </div>
+      </div>
+      <span class="ubadge">✓ 有效</span>
+    </div>
+  </div>
+</div>
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+let latestCookie="",latestInject="",latestCurl="",countdownTimer=null;
+
+function toast(msg,type,duration){
+  type=type||"info";duration=duration||3500;
+  var el=document.createElement("div");
+  el.className="toast "+type;el.textContent=msg;
+  document.getElementById("toastContainer").appendChild(el);
+  setTimeout(function(){el.classList.add("out");setTimeout(function(){el.remove()},260)},duration);
+}
+
+(function(){
+  var saved=localStorage.getItem("bili-theme");
+  var t=saved||(window.matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");
+  document.documentElement.setAttribute("data-theme",t);
+  localStorage.setItem("bili-theme",t);
+})();
+document.getElementById("themeToggle").onclick=function(){
+  var cur=document.documentElement.getAttribute("data-theme");
+  var t=cur==="dark"?"light":"dark";
+  document.documentElement.setAttribute("data-theme",t);
+  localStorage.setItem("bili-theme",t);
+};
+
+function api(method,path){
+  return fetch(path,{method:method}).then(function(r){
+    if(!r.ok)return r.json().then(function(d){throw new Error(d.message||r.statusText)});
+    return r.json();
+  });
+}
+
+function setQr(url){
+  var img=document.getElementById("qrImg"),ph=document.getElementById("qrPlaceholder");
+  if(url){
+    img.src="/api/qrcode?url="+encodeURIComponent(url)+"&t="+Date.now();
+    img.onload=function(){img.style.display="block";ph.style.display="none";};
+    img.onerror=function(){img.style.display="none";ph.style.display="block";ph.textContent="二维码生成失败";};
+  }else{
+    img.src="";img.style.display="none";ph.style.display="block";ph.textContent="暂无二维码\n点击下方按钮刷新";
+  }
+}
+
+
+
+function setMessage(msg,type){
+  var box=document.getElementById("messageBox");
+  box.className="msg-box"+(type?" "+type:"");box.textContent=msg;
+}
+
+function showUserCard(info){
+  var card=document.getElementById("userCard");
+  if(!info){card.style.display="none";return;}
+  card.style.display="flex";
+  document.getElementById("userAvatar").src=info.face?"/api/avatar?url="+encodeURIComponent(info.face):"";
+  document.getElementById("userName").textContent=info.uname||"--";
+  document.getElementById("userUid").textContent=info.uid||"--";
+  document.getElementById("userLevel").textContent=info.level!=null?info.level:"--";
+  var fmt=function(n){if(n>=10000)return(n/10000).toFixed(1)+"w";return n};
+  document.getElementById("userFollower").textContent=info.follower!=null?fmt(info.follower):"--";
+  document.getElementById("userFollowing").textContent=info.following!=null?fmt(info.following):"--";
+}
+
+function updateCountdown(expireTs){
+  var el=document.getElementById("countdownLine");
+  if(countdownTimer){clearInterval(countdownTimer);countdownTimer=null;}
+  if(!expireTs||expireTs<=0){el.textContent="";return;}
+  function tick(){
+    var now=Math.floor(Date.now()/1000),diff=expireTs-now;
+    if(diff<=0){el.textContent="⚠ Cookie 已过期";el.style.color="var(--error)";return;}
+    var h=Math.floor(diff/3600),m=Math.floor((diff%3600)/60),s=diff%60;
+    el.textContent="⏱ Cookie 剩余有效期: "+h+"h "+m+"m "+s+"s";
+    el.style.color=diff<3600?"var(--warn)":"var(--text2)";
+  }
+  tick();countdownTimer=setInterval(tick,1000);
+}
+
+function getStatus(){
+  api("GET","/api/status").then(function(data){
+    document.getElementById("statusText").textContent=data.status||"未知";
+    document.getElementById("detailText").textContent=data.detail||"";
+    document.getElementById("expireText").textContent=data.expire||"--";
+    document.getElementById("expireLine").className="expire-line";
+    if(data.expire_ts>0){
+      if(Math.floor(Date.now()/1000)>data.expire_ts){
+        document.getElementById("expireLine").classList.add("expired");
+      }else{
+        document.getElementById("expireLine").classList.add("valid");
+      }
+    }
+    updateCountdown(data.expire_ts);setQr(data.qrcode_url);showUserCard(data.user_info);
+    if(data.has_cookie&&!latestCookie)loadCookie(false);
+    if(data.has_cookie&&!data.user_info&&!window._autoTestDone){window._autoTestDone=true;api("GET","/api/test").then(function(d){if(d.valid)showUserCard(d);});}
+  }).catch(function(e){
+    document.getElementById("statusText").textContent="服务异常";
+    document.getElementById("detailText").textContent=e.message;
+    setMessage("连接服务失败: "+e.message,"error");
+  });
+}
+
+function loadCookie(showMsg){
+  api("GET","/api/cookie").then(function(data){
+    latestCookie=data.cookie||"";latestInject=data.inject_code||"";latestCurl=data.curl_format||"";
+    if(showMsg){
+      if(data.cookie){setMessage("本地 Cookie 已加载，可复制使用。","success");toast("Cookie 已加载","success");}
+      else{setMessage("暂无可用 Cookie，请扫码登录。","warn");toast("未找到 Cookie","warn");}
+    }
+  }).catch(function(e){setMessage("读取失败: "+e.message,"error");});
+}
+
+function refreshQr(){
+  document.getElementById("refreshBtn").disabled=true;
+  setMessage("正在获取二维码…","info");
+  api("POST","/api/refresh").then(function(data){
+    setMessage(data.message,"success");toast("二维码已刷新","success");getStatus();
+  }).catch(function(e){setMessage(e.message,"error");toast("刷新失败","error");})
+  .then(function(){document.getElementById("refreshBtn").disabled=false;});
+}
+
+function testCookie(){
+  document.getElementById("testBtn").disabled=true;
+  api("GET","/api/test").then(function(data){
+    if(data.valid){setMessage(data.message,"success");toast("Cookie 有效 ✓","success");showUserCard(data);}
+    else{setMessage(data.message,"warn");toast("Cookie 无效","warn");showUserCard(null);}
+  }).catch(function(e){setMessage("验证失败: "+e.message,"error");})
+  .then(function(){document.getElementById("testBtn").disabled=false;});
+}
+
+function deleteCookie(){
+  if(!confirm("确定清除 Cookie 吗？"))return;
+  api("GET","/api/delete").then(function(data){
+    showUserCard(null);updateCountdown(0);
+    document.getElementById("expireText").textContent="无";
+    document.getElementById("expireLine").className="expire-line";
+    setMessage(data.message,"info");toast("Cookie 已清除","info");getStatus();
+  }).catch(function(e){setMessage("删除失败: "+e.message,"error");});
+}
+
+function copyFromTextarea(id,text,successMsg){
+  if(!text){toast("暂无内容可复制","warn");return;}
+  var ta=document.getElementById(id);ta.focus();ta.select();
+  navigator.clipboard.writeText(text).then(function(){
+    toast(successMsg||"已复制","success");setMessage("已复制到剪贴板","success");
+  },function(){toast("复制失败，请手动 Ctrl+C","warn");});
+}
+
+function copyInject(){loadCookie(false);copyFromTextarea("injectCode",latestInject,"注入代码已复制 ✓");}
+function copyRaw(){loadCookie(false);copyFromTextarea("cookieText",latestCookie,"Cookie 已复制 ✓");}
+function copyCurl(){loadCookie(false);copyFromTextarea("curlText",latestCurl,"Curl 格式已复制 ✓");}
+
+document.getElementById("refreshBtn").onclick=refreshQr;
+document.getElementById("loadBtn").onclick=function(){loadCookie(true);};
+document.getElementById("testBtn").onclick=testCookie;
+document.getElementById("deleteBtn").onclick=deleteCookie;
+document.getElementById("copyInjectBtn").onclick=copyInject;
+document.getElementById("copyRawBtn").onclick=copyRaw;
+document.getElementById("copyCurlBtn").onclick=copyCurl;
+
+getStatus();loadCookie(false);
+(function poll(){
+  var interval=document.getElementById("statusText").textContent==="登录成功"?30000:2000;
+  setTimeout(function(){getStatus();poll();},interval);
+})();
+(function(){
+  var el=document.getElementById("bookmarkletLink");
+  if(!el)return;
+  var bm="javascript:fetch('http://127.0.0.1:8888/api/cookie').then(r=>r.json()).then(d=>{if(d.cookie){d.cookie.split(';').forEach(c=>{var p=c.trim();if(p){document.cookie=p+';path=/;domain=.bilibili.com'}});alert('Cookie injected!');location.reload()}else{alert('No cookie')}}).catch(e=>alert('Failed: '+e.message))";
+  el.href=bm;
+})();
+</script>
+</body>
+</html>
