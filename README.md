@@ -1,5 +1,7 @@
 # B站扫码登录 · Cookie 工具
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 一键扫码获取 B站 Cookie，支持本地生成二维码、自动检测端口、智能轮询。
 
 ## 功能
