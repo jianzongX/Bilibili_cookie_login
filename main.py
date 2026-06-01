@@ -53,6 +53,8 @@ class AppState:
     expire_timestamp: int = 0
     user_info: Optional[dict] = None
     cookie_valid: Optional[bool] = None
+    refresh_token: str = ""
+    auto_refresh: bool = True
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def update(self, **kwargs: Any) -> None:
@@ -72,6 +74,7 @@ class AppState:
                 "has_cookie": bool(self.cookie),
                 "user_info": self.user_info,
                 "cookie_valid": self.cookie_valid,
+                "auto_refresh": self.auto_refresh,
             }
 
     def get_cookie(self) -> str:
@@ -98,13 +101,16 @@ def read_cookie_file() -> dict:
         return {}
 
 
-def save_cookie_file(cookie: str) -> None:
+def save_cookie_file(cookie: str, refresh_token: str = "") -> None:
     try:
+        data = {
+            "cookie": cookie,
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        if refresh_token:
+            data["refresh_token"] = refresh_token
         with open(COOKIE_FILE, "w", encoding="utf-8") as f:
-            json.dump({
-                "cookie": cookie,
-                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }, f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error("保存 cookie.json 失败: %s", e)
 
@@ -175,9 +181,11 @@ class BilibiliLogin:
 
                 if code == 0:
                     cookie_str = self._extract_cookies(cookie_headers)
+                    refresh_token = data.get("data", {}).get("refresh_token", "")
                     if cookie_str:
                         self.state.set_cookie(cookie_str)
-                        save_cookie_file(cookie_str)
+                        save_cookie_file(cookie_str, refresh_token)
+                        self.state.update(refresh_token=refresh_token)
                         exp, ts = self._parse_expiry(cookie_str)
                         self.state.update(expire_time=exp, expire_timestamp=ts)
                     self.state.update(
@@ -315,24 +323,154 @@ class BilibiliLogin:
         except Exception as e:
             return {"valid": False, "message": f"验证失败: {e}"}
 
+    # ============================================================
+    #  Cookie Refresh (B站官方刷新 API，无需重新扫码)
+    # ============================================================
+
+    BILI_PUBKEY = """-----BEGIN PUBLIC KEY-----
+MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDLgd2OAkcGVtoE3ThUREbio0Eg
+Uc/prcajMKXvkCKFCWhJYJcLkcM2DKKcSeFpD/j6Boy538YXnR6VhcuUJOhH2x71
+nzPjfdTcqMz7djHum0qSZA0AyCBDABUqCrfNgCiJ00Ra7GmRj+YCK1NJEuewlb40
+JNrRuoEUXpabUzGB8QIDAQAB
+-----END PUBLIC KEY-----"""
+
+    @staticmethod
+    def _extract_bili_jct(cookie_str: str) -> str:
+        """从 Cookie 中提取 bili_jct (CSRF Token)"""
+        for part in cookie_str.split(";"):
+            part = part.strip()
+            if part.startswith("bili_jct="):
+                return part.split("=", 1)[1]
+        return ""
+
+    @staticmethod
+    def _generate_correspond_path() -> str:
+        """RSA-OAEP 加密生成 correspondPath"""
+        from Crypto.PublicKey import RSA
+        from Crypto.Cipher import PKCS1_OAEP
+        from Crypto.Hash import SHA256
+        timestamp_ms = str(int(time.time() * 1000))
+        message = f"refresh_{timestamp_ms}".encode("utf-8")
+        key = RSA.import_key(BilibiliLogin.BILI_PUBKEY)
+        cipher = PKCS1_OAEP.new(key, hashAlgo=SHA256)
+        encrypted = cipher.encrypt(message)
+        return encrypted.hex()
+
+    @staticmethod
+    def _get_refresh_token_from_file() -> str:
+        """从 cookie.json 读取 refresh_token"""
+        try:
+            data = read_cookie_file()
+            return data.get("refresh_token", "")
+        except Exception:
+            return ""
+
+    def refresh_cookie_flow(self) -> dict:
+        """执行完整的 Cookie 刷新流程"""
+        cookie = self.state.get_cookie()
+        if not cookie:
+            return {"ok": False, "message": "没有 Cookie，请先登录"}
+        bili_jct = self._extract_bili_jct(cookie)
+        if not bili_jct:
+            return {"ok": False, "message": "Cookie 中缺少 bili_jct"}
+        refresh_token = self._get_refresh_token_from_file()
+        if not refresh_token:
+            return {"ok": False, "message": "缺少 refresh_token，请重新登录获取"}
+        try:
+            # 1. 检查是否需要刷新
+            info_url = f"https://passport.bilibili.com/x/passport-login/web/cookie/info?csrf={bili_jct}"
+            req = self._build_request(info_url)
+            req.add_header("Cookie", cookie)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                info_data = json.loads(resp.read().decode("utf-8"))
+            need_refresh = info_data.get("data", {}).get("refresh", False)
+            logger.info("Cookie 是否需要刷新: %s", need_refresh)
+            # 2. 生成 correspondPath
+            correspond_path = self._generate_correspond_path()
+            # 3. 获取 refresh_csrf
+            csrf_url = f"https://www.bilibili.com/correspond/1/{correspond_path}"
+            csrf_req = self._build_request(csrf_url)
+            csrf_req.add_header("Cookie", cookie)
+            with urllib.request.urlopen(csrf_req, timeout=10) as resp:
+                html = resp.read().decode("utf-8")
+            # 从 HTML 中解析 refresh_csrf
+            import re
+            match = re.search(r'<div[^>]*id="1-name"[^>]*>(.*?)</div>', html)
+            if not match:
+                return {"ok": False, "message": "获取 refresh_csrf 失败，correspondPath 可能已过期"}
+            refresh_csrf = match.group(1).strip()
+            # 4. 刷新 Cookie
+            refresh_payload = urllib.parse.urlencode({
+                "csrf": bili_jct,
+                "refresh_csrf": refresh_csrf,
+                "source": "main_web",
+                "refresh_token": refresh_token,
+            }).encode("utf-8")
+            refresh_url = "https://passport.bilibili.com/x/passport-login/web/cookie/refresh"
+            refresh_req = urllib.request.Request(refresh_url, data=refresh_payload, method="POST")
+            for k, v in DEFAULT_HEADERS.items():
+                refresh_req.add_header(k, v)
+            refresh_req.add_header("Cookie", cookie)
+            refresh_req.add_header("Content-Type", "application/x-www-form-urlencoded")
+            with urllib.request.urlopen(refresh_req, timeout=10) as resp:
+                refresh_body = json.loads(resp.read().decode("utf-8"))
+                new_cookie_headers = resp.headers.get_all("Set-Cookie", [])
+            if refresh_body.get("code") != 0:
+                return {"ok": False, "message": f"刷新失败: {refresh_body.get('message', '未知错误')}"}
+            new_cookie_str = self._extract_cookies(new_cookie_headers)
+            new_refresh_token = refresh_body.get("data", {}).get("refresh_token", "")
+            if not new_cookie_str:
+                return {"ok": False, "message": "刷新后未获取到新 Cookie"}
+            # 5. 确认更新（使用新 Cookie 的 bili_jct + 旧的 refresh_token）
+            new_bili_jct = self._extract_bili_jct(new_cookie_str)
+            confirm_payload = urllib.parse.urlencode({
+                "csrf": new_bili_jct,
+                "refresh_token": refresh_token,
+            }).encode("utf-8")
+            confirm_url = "https://passport.bilibili.com/x/passport-login/web/confirm/refresh"
+            confirm_req = urllib.request.Request(confirm_url, data=confirm_payload, method="POST")
+            for k, v in DEFAULT_HEADERS.items():
+                confirm_req.add_header(k, v)
+            confirm_req.add_header("Cookie", new_cookie_str)
+            confirm_req.add_header("Content-Type", "application/x-www-form-urlencoded")
+            try:
+                with urllib.request.urlopen(confirm_req, timeout=10):
+                    pass
+            except Exception:
+                pass  # 确认失败不影响已刷新结果
+            # 6. 保存新 Cookie
+            self.state.set_cookie(new_cookie_str)
+            save_cookie_file(new_cookie_str, new_refresh_token)
+            exp, ts = self._parse_expiry(new_cookie_str)
+            self.state.update(expire_time=exp, expire_timestamp=ts, refresh_token=new_refresh_token)
+            logger.info("Cookie 刷新成功！")
+            return {"ok": True, "message": "Cookie 刷新成功"}
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8")[:200]
+            return {"ok": False, "message": f"HTTP {e.code}: {body}"}
+        except Exception as e:
+            return {"ok": False, "message": f"刷新失败: {e}"}
+
     # ----- Lifecycle -----
 
     def load_local_cookie(self) -> str:
         if not COOKIE_FILE.exists():
-            self.state.update(expire_time="无", expire_timestamp=0)
+            self.state.update(expire_time="无", expire_timestamp=0, refresh_token="")
             return ""
         try:
             data = read_cookie_file()
             cookie = self.normalize_cookie(data.get("cookie", ""))
+            refresh_token = data.get("refresh_token", "")
+            self.state.update(refresh_token=refresh_token)
             if cookie:
                 exp, ts = self._parse_expiry(cookie)
                 self.state.update(expire_time=exp, expire_timestamp=ts)
                 if cookie != data.get("cookie", ""):
-                    save_cookie_file(cookie)
+                    save_cookie_file(cookie, refresh_token)
                 return cookie
         except Exception as e:
             logger.error("读取 cookie.json 失败: %s", e)
-        self.state.update(expire_time="无", expire_timestamp=0)
+        self.state.update(expire_time="无", expire_timestamp=0, refresh_token="")
         return ""
 
     def start_login_flow(self) -> tuple[bool, str]:
@@ -430,6 +568,15 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             else:
                 self.send_json({"ok": False, "message": f"刷新失败: {msg or '请检查网络'}"}, 500)
             return
+
+        if self.path == "/api/toggle-auto-refresh":
+            new_val = not state.auto_refresh
+            state.update(auto_refresh=new_val)
+            return self.send_json({"auto_refresh": new_val})
+
+        if self.path == "/api/refresh-cookie":
+            result = self.login_obj.refresh_cookie_flow()
+            return self.send_json(result)
 
         self.send_json({"ok": False, "message": "未知路由"}, 404)
 

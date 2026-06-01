@@ -111,6 +111,9 @@ textarea:focus{outline:none;border-color:var(--accent)}
       <button class="btn btn-success" id="testBtn">检测有效性</button>
       <button class="btn btn-danger" id="deleteBtn">清除 Cookie</button>
     </div>
+    <div class="actions" style="margin-top:4px">
+      <button class="btn btn-secondary" id="autoRefreshBtn" style="min-width:130px">🔄 自动刷新</button>
+    </div>
   </div>
 
   <div class="panel cookie-panel">
@@ -230,14 +233,31 @@ function updateCountdown(expireTs){
   tick();countdownTimer=setInterval(tick,1000);
 }
 
+function syncAutoRefresh(val){
+  autoRefreshEnabled=val;
+  var btn=document.getElementById("autoRefreshBtn");
+  if(!btn)return;
+  btn.textContent="🔄 "+(val?"自动刷新: 开":"自动刷新: 关");
+  btn.className="btn "+(val?"btn-primary":"btn-secondary");
+}
+
 function getStatus(){
   api("GET","/api/status").then(function(data){
-    document.getElementById("statusText").textContent=data.status||"未知";
-    document.getElementById("detailText").textContent=data.detail||"";
+    syncAutoRefresh(data.auto_refresh);
+    var now=Math.floor(Date.now()/1000);
+    var expired=data.expire_ts>0&&now>data.expire_ts;
+    // 如果 Cookie 已过期且状态不是登录中，显示过期
+    if(expired&&data.status!=="等待扫码"&&data.status!=="已扫码，等待确认"){
+      document.getElementById("statusText").textContent="Cookie 已过期";
+      document.getElementById("detailText").textContent="Cookie 已过期，点击刷新或等待自动刷新";
+    }else{
+      document.getElementById("statusText").textContent=data.status||"未知";
+      document.getElementById("detailText").textContent=data.detail||"";
+    }
     document.getElementById("expireText").textContent=data.expire||"--";
     document.getElementById("expireLine").className="expire-line";
     if(data.expire_ts>0){
-      if(Math.floor(Date.now()/1000)>data.expire_ts){
+      if(expired){
         document.getElementById("expireLine").classList.add("expired");
       }else{
         document.getElementById("expireLine").classList.add("valid");
@@ -311,9 +331,41 @@ document.getElementById("copyInjectBtn").onclick=copyInject;
 document.getElementById("copyRawBtn").onclick=copyRaw;
 document.getElementById("copyCurlBtn").onclick=copyCurl;
 
+function refreshCookie(){
+  api("POST","/api/refresh-cookie").then(function(data){
+    if(data.ok){
+      toast("Cookie 已自动续期！","success");
+      setMessage("Cookie 刷新成功！","success");
+      getStatus();
+    }else{
+      toast("刷新失败: "+data.message,"error");
+      // 刷新失败则回退到扫码方式
+      if(autoRefreshEnabled) refreshQr();
+    }
+  }).catch(function(e){
+    toast("刷新请求失败: "+e.message,"error");
+  });
+}
+
+var autoRefreshEnabled=false;
+document.getElementById("autoRefreshBtn").onclick=function(){
+  api("POST","/api/toggle-auto-refresh").then(function(data){
+    autoRefreshEnabled=data.auto_refresh;
+    var btn=document.getElementById("autoRefreshBtn");
+    btn.textContent="🔄 "+(autoRefreshEnabled?"自动续期: 开":"自动续期: 关");
+    btn.className="btn "+(autoRefreshEnabled?"btn-primary":"btn-secondary");
+    toast(autoRefreshEnabled?"自动续期已开启~过期后台自动刷新":"自动续期已关闭","info");
+  });
+};
+
 getStatus();loadCookie(false);
 (function poll(){
-  var interval=document.getElementById("statusText").textContent==="登录成功"?30000:2000;
+  var st=document.getElementById("statusText").textContent;
+  // Cookie 过期且自动续期开启 → 后台 API 刷新，无需扫码
+  if(autoRefreshEnabled&&st==="Cookie 已过期"){
+    refreshCookie();
+  }
+  var interval=st==="登录成功"?30000:2000;
   setTimeout(function(){getStatus();poll();},interval);
 })();
 (function(){
